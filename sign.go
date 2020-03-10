@@ -25,12 +25,31 @@ type SignedData struct {
 // ready to be signed via AddSigner. The digest algorithm is set to SHA1 by default
 // and can be changed by calling SetDigestAlgorithm.
 func NewSignedData(data []byte) (*SignedData, error) {
+	signedData, err := newSignedData(OIDData, data)
+	if err != nil {
+		return nil, err
+	}
+	return signedData, nil
+}
+
+// NewSignedDataWithContentType takes content type and data and initializes a PKCS7 SignedData struct that is
+// ready to be signed via AddSigner. The digest algorithm is set to SHA1 by default
+// and can be changed by calling SetDigestAlgorithm.
+func NewSignedDataWithContentType(contentType asn1.ObjectIdentifier, data []byte) (*SignedData, error) {
+	signedData, err := newSignedData(contentType, data)
+	if err != nil {
+		return nil, err
+	}
+	return signedData, nil
+}
+
+func newSignedData(contentType asn1.ObjectIdentifier, data []byte) (*SignedData, error) {
 	content, err := asn1.Marshal(data)
 	if err != nil {
 		return nil, err
 	}
 	ci := contentInfo{
-		ContentType: OIDData,
+		ContentType: contentType,
 		Content:     asn1.RawValue{Class: 2, Tag: 0, Bytes: content, IsCompound: true},
 	}
 	sd := signedData{
