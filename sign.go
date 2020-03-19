@@ -120,7 +120,14 @@ func (sd *SignedData) SetDigestAlgorithm(d asn1.ObjectIdentifier) {
 // AddSigner is a wrapper around AddSignerChain() that adds a signer without any parent.
 func (sd *SignedData) AddSigner(ee *x509.Certificate, pkey crypto.PrivateKey, config SignerInfoConfig) error {
 	var parents []*x509.Certificate
-	return sd.AddSignerChain(ee, pkey, parents, config)
+	return sd.addSignerChain(ee, pkey, parents, config, true)
+}
+
+// AddSignerNoChain is a wrapper around AddSignerChain() that adds a signer without any parent.
+// Use this method, if no certificate needs to be placed in SignedData certificates
+func (sd *SignedData) AddSignerNoChain(ee *x509.Certificate, pkey crypto.PrivateKey, config SignerInfoConfig) error {
+	var parents []*x509.Certificate
+	return sd.addSignerChain(ee, pkey, parents, config, false)
 }
 
 // AddSignerChain signs attributes about the content and adds certificates
@@ -137,6 +144,10 @@ func (sd *SignedData) AddSigner(ee *x509.Certificate, pkey crypto.PrivateKey, co
 // section of the SignedData.SignerInfo, alongside the serial number of
 // the end-entity.
 func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKey, chain []*x509.Certificate, config SignerInfoConfig) error {
+	return sd.addSignerChain(ee, pkey, chain, config, true)
+}
+
+func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKey, chain []*x509.Certificate, config SignerInfoConfig, includeCertificates bool) error {
 	sd.sd.DigestAlgorithmIdentifiers = append(sd.sd.DigestAlgorithmIdentifiers, pkix.AlgorithmIdentifier{Algorithm: sd.digestOid})
 	hash, err := getHashForOID(sd.digestOid)
 	if err != nil {
@@ -195,9 +206,12 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 		Version:                   1,
 	}
 	// create signature of signed attributes
-	sd.certs = append(sd.certs, ee)
-	sd.certs = append(sd.certs, chain...)
 	sd.sd.SignerInfos = append(sd.sd.SignerInfos, signer)
+
+	if includeCertificates {
+		sd.certs = append(sd.certs, ee)
+		sd.certs = append(sd.certs, chain...)
+	}
 	return nil
 }
 

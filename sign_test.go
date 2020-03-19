@@ -182,7 +182,7 @@ func TestSignAndVerifyWithOpenSSL(t *testing.T) {
 	os.Remove(tmpContentFile.Name()) // clean up
 }
 
-func ExampleSignedData() {
+func ExampleSignedData(t *testing.T) {
 	// generate a signing cert or load a key pair
 	cert, err := createTestCertificate(x509.SHA256WithRSA)
 	if err != nil {
@@ -226,7 +226,7 @@ func TestSignedDataWithContentType(t *testing.T) {
 	}
 
 	// Add the signing cert and private key
-	if err := signedData.AddSigner(cert.Certificate, cert.PrivateKey, SignerInfoConfig{}); err != nil {
+	if err := signedData.AddSignerNoChain(cert.Certificate, cert.PrivateKey, SignerInfoConfig{}); err != nil {
 		t.Fatalf("Cannot add signer: %s", err)
 	}
 
