@@ -32,7 +32,7 @@ func NewSignedData(data []byte) (*SignedData, error) {
 	return signedData, nil
 }
 
-// One of the practical usecase of using this function is below:
+// One of the practical use case of NewSignedDataWithContentType is:
 // Pasted from RFC 3161
 //
 // 2.4.2. Response Format
@@ -143,7 +143,7 @@ func (sd *SignedData) AddSigner(ee *x509.Certificate, pkey crypto.PrivateKey, co
 	return sd.addSignerChain(ee, pkey, parents, config, true)
 }
 
-// One of the practical usecase of using this function is below:
+// One of the practical use case of AddSignerNoChain is:
 // Pasted from RFC 3161
 
 // 2.4.1. Request Format
