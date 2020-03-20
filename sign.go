@@ -32,6 +32,26 @@ func NewSignedData(data []byte) (*SignedData, error) {
 	return signedData, nil
 }
 
+// One of the practical use cases of NewSignedDataWithContentType is:
+// Pasted from RFC 3161
+//
+// 2.4.2. Response Format
+// TimeStampToken ::= ContentInfo
+//      -- contentType is id-signedData ([CMS])
+//      -- content is SignedData ([CMS])
+//
+// The fields of type EncapsulatedContentInfo of the SignedData
+// construct have the following meanings:
+//
+// eContentType is an object identifier that uniquely specifies the
+// content type.  For a time-stamp token it is defined as:
+//
+// id-ct-TSTInfo  OBJECT IDENTIFIER ::= { iso(1) member-body(2)
+// us(840) rsadsi(113549) pkcs(1) pkcs-9(9) smime(16) ct(1) 4}
+//
+// eContent is the content itself, carried as an octet string.
+// The eContent SHALL be the DER-encoded value of TSTInfo.
+
 // NewSignedDataWithContentType takes content type and data and initializes a PKCS7 SignedData struct that is
 // ready to be signed via AddSigner. The digest algorithm is set to SHA1 by default
 // and can be changed by calling SetDigestAlgorithm.
@@ -120,7 +140,28 @@ func (sd *SignedData) SetDigestAlgorithm(d asn1.ObjectIdentifier) {
 // AddSigner is a wrapper around AddSignerChain() that adds a signer without any parent.
 func (sd *SignedData) AddSigner(ee *x509.Certificate, pkey crypto.PrivateKey, config SignerInfoConfig) error {
 	var parents []*x509.Certificate
-	return sd.AddSignerChain(ee, pkey, parents, config)
+	return sd.addSignerChain(ee, pkey, parents, config, true)
+}
+
+// One of the practical use cases of AddSignerNoChain is:
+// Pasted from RFC 3161
+
+// 2.4.1. Request Format
+// If the certReq field is present and set to true, the TSA's public key
+// certificate that is referenced by the ESSCertID identifier inside a
+// SigningCertificate attribute in the response MUST be provided by the
+// TSA in the certificates field from the SignedData structure in that
+// response.  That field may also contain other certificates.
+
+// If the certReq field is missing or if the certReq field is present
+// and set to false then the certificates field from the SignedData
+// structure MUST not be present in the response.
+
+// AddSignerNoChain is a wrapper around AddSignerChain() that adds a signer without any parent.
+// Use this method, if no certificate needs to be placed in SignedData certificates
+func (sd *SignedData) AddSignerNoChain(ee *x509.Certificate, pkey crypto.PrivateKey, config SignerInfoConfig) error {
+	var parents []*x509.Certificate
+	return sd.addSignerChain(ee, pkey, parents, config, false)
 }
 
 // AddSignerChain signs attributes about the content and adds certificates
@@ -137,6 +178,10 @@ func (sd *SignedData) AddSigner(ee *x509.Certificate, pkey crypto.PrivateKey, co
 // section of the SignedData.SignerInfo, alongside the serial number of
 // the end-entity.
 func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKey, chain []*x509.Certificate, config SignerInfoConfig) error {
+	return sd.addSignerChain(ee, pkey, chain, config, true)
+}
+
+func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKey, chain []*x509.Certificate, config SignerInfoConfig, includeCertificates bool) error {
 	sd.sd.DigestAlgorithmIdentifiers = append(sd.sd.DigestAlgorithmIdentifiers, pkix.AlgorithmIdentifier{Algorithm: sd.digestOid})
 	hash, err := getHashForOID(sd.digestOid)
 	if err != nil {
@@ -195,9 +240,12 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 		Version:                   1,
 	}
 	// create signature of signed attributes
-	sd.certs = append(sd.certs, ee)
-	sd.certs = append(sd.certs, chain...)
 	sd.sd.SignerInfos = append(sd.sd.SignerInfos, signer)
+
+	if includeCertificates {
+		sd.certs = append(sd.certs, ee)
+		sd.certs = append(sd.certs, chain...)
+	}
 	return nil
 }
 
