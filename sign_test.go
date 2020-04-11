@@ -156,27 +156,53 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	os.Remove(tmpSignerCertFile.Name()) // clean up
 }
 
-func ExampleSignedData() {
+func ExampleSignedData(t *testing.T) {
 	// generate a signing cert or load a key pair
 	cert, err := createTestCertificate(x509.SHA256WithRSA)
 	if err != nil {
-		fmt.Printf("Cannot create test certificates: %s", err)
+		t.Fatalf("Cannot create test certificates: %s", err)
 	}
 
 	// Initialize a SignedData struct with content to be signed
 	signedData, err := NewSignedData([]byte("Example data to be signed"))
 	if err != nil {
-		fmt.Printf("Cannot initialize signed data: %s", err)
+		t.Fatalf("Cannot initialize signed data: %s", err)
 	}
 
 	// Add the signing cert and private key
-	if err := signedData.AddSigner(cert.Certificate, cert.PrivateKey, SignerInfoConfig{}); err != nil {
-		fmt.Printf("Cannot add signer: %s", err)
+	if err := signedData.AddSigner(cert.Certificate, *cert.PrivateKey, SignerInfoConfig{}); err != nil {
+		t.Fatalf("Cannot add signer: %s", err)
 	}
 
 	// Call Detach() is you want to remove content from the signature
 	// and generate an S/MIME detached signature
 	signedData.Detach()
+
+	// Finish() to obtain the signature bytes
+	detachedSignature, err := signedData.Finish()
+	if err != nil {
+		t.Fatalf("Cannot finish signing data: %s", err)
+	}
+	pem.Encode(os.Stdout, &pem.Block{Type: "PKCS7", Bytes: detachedSignature})
+}
+
+func TestSignedDataWithContentType(t *testing.T) {
+	// generate a signing cert or load a key pair
+	cert, err := createTestCertificate(x509.SHA1WithRSA)
+	if err != nil {
+		t.Fatalf("Cannot create test certificates: %s", err)
+	}
+
+	// Initialize a SignedData struct with content to be signed
+	signedData, err := NewSignedDataWithContentType(asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 1, 4}, []byte("Example data to be signed"))
+	if err != nil {
+		t.Fatalf("Cannot initialize signed data: %s", err)
+	}
+
+	// Add the signing cert and private key
+	if err := signedData.AddSignerNoChain(cert.Certificate, *cert.PrivateKey, SignerInfoConfig{}); err != nil {
+		t.Fatalf("Cannot add signer: %s", err)
+	}
 
 	// Finish() to obtain the signature bytes
 	detachedSignature, err := signedData.Finish()
