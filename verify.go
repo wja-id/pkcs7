@@ -7,7 +7,6 @@ import (
 	"encoding/asn1"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -113,8 +112,8 @@ func (p7 *PKCS7) UnmarshalSignedAttribute(attributeType asn1.ObjectIdentifier, o
 
 func parseSignedData(data []byte) (*PKCS7, error) {
 	var sd signedData
-	if r, err := asn1.Unmarshal(data, &sd); err != nil {
-		log.Println(r, err)
+	if _, err := asn1.Unmarshal(data, &sd); err != nil {
+		return nil, err
 	}
 	certs, err := sd.Certificates.Parse()
 	if err != nil {
