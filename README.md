@@ -63,7 +63,8 @@ func SignAndDetach(content []byte, cert *x509.Certificate, privkey *rsa.PrivateK
 }
 ```
 
-
+### why we fork this package?
+We need to implement custom signer for adobe pkcs7 which leverage globalsign DSS API which not supported by current version unidoc 
 
 ## Credits
-This is a fork of [fullsailor/pkcs7](https://github.com/fullsailor/pkcs7)
+This is a fork of [unidoc/pkcs7](https://github.com/unidoc/pkcs7)

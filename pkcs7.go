@@ -16,6 +16,7 @@ import (
 	"sort"
 
 	_ "crypto/sha1" // for crypto.SHA1
+	globalsign "github.com/wja-id/globalsign-sdk"
 )
 
 // PKCS7 Represents a PKCS7 structure
@@ -147,6 +148,8 @@ func getOIDForEncryptionAlgorithm(pkey crypto.PrivateKey, OIDDigestAlg asn1.Obje
 		}
 	case *dsa.PrivateKey:
 		return OIDDigestAlgorithmDSA, nil
+	case *globalsign.Signer:
+		return OIDEncryptionAlgorithmRSASHA256, nil
 	}
 	return nil, fmt.Errorf("pkcs7: cannot convert encryption algorithm to oid, unknown private key type %T", pkey)
 
