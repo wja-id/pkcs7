@@ -346,6 +346,33 @@ func (si *signerInfo) SetUnauthenticatedAttributes(extraUnsignedAttrs []Attribut
 	return nil
 }
 
+// AddTimestampTokenToSigner inserts TimestampToken which described in RFC3161 into
+// unauthenticated attribute of that signer
+func (sd *SignedData) AddTimestampTokenToSigner(signerID int, tst []byte) (err error) {
+	if len(sd.sd.SignerInfos) < (signerID + 1) {
+		return fmt.Errorf("no signer information found for ID %d", signerID)
+	}
+
+	// add the timestamp token to the unauthenticated attributes
+	attrs := &attributes{}
+	for _, attr := range sd.sd.SignerInfos[signerID].UnauthenticatedAttributes {
+		attrs.Add(attr.Type, attr.Value)
+	}
+
+	// // unmarshal timestamp token
+	// token, err := ParseTS(tst)
+	// if err != nil {
+	// 	return err
+	// }
+
+	attrs.Add(OIDAttributeTimeStampToken, tst)
+	sd.sd.SignerInfos[signerID].UnauthenticatedAttributes, err = attrs.ForMarshalling()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // AddTimestampToSigner requests a RFC3161 timestamp from an upstream tsa for a
 // given signer and inserts it into the unauthenticated attributes of that signer
 func (sd *SignedData) AddTimestampToSigner(signerID int, tsa string) (err error) {
@@ -400,17 +427,8 @@ func (sd *SignedData) AddTimestampToSigner(signerID int, tsa string) (err error)
 	if len(tsResp.TimeStampToken.Bytes) == 0 {
 		return fmt.Errorf("no pkcs7 data in timestamp response")
 	}
-	// add the timestamp token to the unauthenticated attributes
-	attrs := &attributes{}
-	for _, attr := range sd.sd.SignerInfos[signerID].UnauthenticatedAttributes {
-		attrs.Add(attr.Type, attr.Value)
-	}
-	attrs.Add(OIDAttributeTimeStampToken, tsResp.TimeStampToken)
-	sd.sd.SignerInfos[signerID].UnauthenticatedAttributes, err = attrs.ForMarshalling()
-	if err != nil {
-		return err
-	}
-	return nil
+
+	return sd.AddTimestampTokenToSigner(signerID, tsResp.TimeStampToken.Bytes)
 }
 
 // AddCertificate adds the certificate to the payload. Useful for parent certificates
