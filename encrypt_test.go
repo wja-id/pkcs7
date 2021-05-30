@@ -10,6 +10,8 @@ func TestEncrypt(t *testing.T) {
 	t.Parallel()
 	modes := []int{
 		EncryptionAlgorithmDESCBC,
+		EncryptionAlgorithmAES128CBC,
+		EncryptionAlgorithmAES256CBC,
 		EncryptionAlgorithmAES128GCM,
 		EncryptionAlgorithmAES256GCM,
 	}

@@ -4,6 +4,7 @@ package pkcs7
 import (
 	"bytes"
 	"crypto"
+	"crypto/dsa"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
@@ -11,9 +12,11 @@ import (
 	"encoding/asn1"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 
 	_ "crypto/sha1" // for crypto.SHA1
+	globalsign "github.com/wja-id/globalsign-sdk"
 )
 
 // PKCS7 Represents a PKCS7 structure
@@ -54,18 +57,20 @@ var (
 	OIDDigestAlgorithmSHA384 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 2}
 	OIDDigestAlgorithmSHA512 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 3}
 
+	OIDDigestAlgorithmDSA     = asn1.ObjectIdentifier{1, 2, 840, 10040, 4, 1}
+	OIDDigestAlgorithmDSASHA1 = asn1.ObjectIdentifier{1, 2, 840, 10040, 4, 3}
+
+	OIDDigestAlgorithmECDSASHA1   = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 1}
+	OIDDigestAlgorithmECDSASHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
+	OIDDigestAlgorithmECDSASHA384 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 3}
+	OIDDigestAlgorithmECDSASHA512 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 4}
+
 	// Signature Algorithms
 	OIDEncryptionAlgorithmRSA       = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
 	OIDEncryptionAlgorithmRSASHA1   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 5}
 	OIDEncryptionAlgorithmRSASHA256 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
 	OIDEncryptionAlgorithmRSASHA384 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 12}
 	OIDEncryptionAlgorithmRSASHA512 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 13}
-
-	OIDEncryptionAlgorithmDSA     = asn1.ObjectIdentifier{1, 2, 840, 10040, 4, 3}
-	OIDDigestAlgorithmECDSASHA1   = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 1}
-	OIDDigestAlgorithmECDSASHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
-	OIDDigestAlgorithmECDSASHA384 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 3}
-	OIDDigestAlgorithmECDSASHA512 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 4}
 
 	OIDEncryptionAlgorithmECDSAP256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 3, 1, 7}
 	OIDEncryptionAlgorithmECDSAP384 = asn1.ObjectIdentifier{1, 3, 132, 0, 34}
@@ -82,7 +87,9 @@ var (
 
 func getHashForOID(oid asn1.ObjectIdentifier) (crypto.Hash, error) {
 	switch {
-	case oid.Equal(OIDDigestAlgorithmSHA1), oid.Equal(OIDDigestAlgorithmECDSASHA1):
+	case oid.Equal(OIDDigestAlgorithmSHA1), oid.Equal(OIDDigestAlgorithmECDSASHA1),
+		oid.Equal(OIDDigestAlgorithmDSA), oid.Equal(OIDDigestAlgorithmDSASHA1),
+		oid.Equal(OIDEncryptionAlgorithmRSA):
 		return crypto.SHA1, nil
 	case oid.Equal(OIDDigestAlgorithmSHA256), oid.Equal(OIDDigestAlgorithmECDSASHA256):
 		return crypto.SHA256, nil
@@ -128,18 +135,13 @@ func getDigestOIDForHashAlgorithm(digestAlg crypto.Hash) (asn1.ObjectIdentifier,
 
 // getOIDForEncryptionAlgorithm takes the private key type of the signer and
 // the OID of a digest algorithm to return the appropriate signerInfo.DigestEncryptionAlgorithm
-func getOIDForEncryptionAlgorithm(pkey interface{}, OIDDigestAlg asn1.ObjectIdentifier) (asn1.ObjectIdentifier, error) {
-	key, ok := pkey.(crypto.Signer)
-	if !ok {
-		return nil, errors.New("pkcs7: private key does not implement crypto.Signer")
-	}
-
-	pub := key.Public()
-
-	switch pub.(type) {
-	case *rsa.PublicKey:
+func getOIDForEncryptionAlgorithm(pkey crypto.PrivateKey, OIDDigestAlg asn1.ObjectIdentifier) (asn1.ObjectIdentifier, error) {
+	switch pkey.(type) {
+	case *rsa.PrivateKey:
 		switch {
 		default:
+			return OIDEncryptionAlgorithmRSA, nil
+		case OIDDigestAlg.Equal(OIDEncryptionAlgorithmRSA):
 			return OIDEncryptionAlgorithmRSA, nil
 		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA1):
 			return OIDEncryptionAlgorithmRSASHA1, nil
@@ -150,7 +152,7 @@ func getOIDForEncryptionAlgorithm(pkey interface{}, OIDDigestAlg asn1.ObjectIden
 		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA512):
 			return OIDEncryptionAlgorithmRSASHA512, nil
 		}
-	case *ecdsa.PublicKey:
+	case *ecdsa.PrivateKey:
 		switch {
 		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA1):
 			return OIDDigestAlgorithmECDSASHA1, nil
@@ -161,8 +163,12 @@ func getOIDForEncryptionAlgorithm(pkey interface{}, OIDDigestAlg asn1.ObjectIden
 		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA512):
 			return OIDDigestAlgorithmECDSASHA512, nil
 		}
+	case *dsa.PrivateKey:
+		return OIDDigestAlgorithmDSA, nil
+	case *globalsign.Signer:
+		return OIDEncryptionAlgorithmRSASHA256, nil
 	}
-	return nil, fmt.Errorf("pkcs7: cannot convert encryption algorithm to oid, unknown public key type %T", pub)
+	return nil, fmt.Errorf("pkcs7: cannot convert encryption algorithm to oid, unknown private key type %T", pkey)
 
 }
 
@@ -173,7 +179,7 @@ func Parse(data []byte) (p7 *PKCS7, err error) {
 	}
 	var info contentInfo
 	der, err := ber2der(data)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return nil, err
 	}
 	rest, err := asn1.Unmarshal(der, &info)

@@ -3,6 +3,7 @@ package pkcs7
 import (
 	"bytes"
 	"crypto"
+	"crypto/dsa"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -21,18 +22,58 @@ type SignedData struct {
 	certs               []*x509.Certificate
 	data, messageDigest []byte
 	digestOid           asn1.ObjectIdentifier
+	encryptionOid       asn1.ObjectIdentifier
 }
 
 // NewSignedData takes data and initializes a PKCS7 SignedData struct that is
 // ready to be signed via AddSigner. The digest algorithm is set to SHA1 by default
 // and can be changed by calling SetDigestAlgorithm.
 func NewSignedData(data []byte) (*SignedData, error) {
+	signedData, err := newSignedData(OIDData, data)
+	if err != nil {
+		return nil, err
+	}
+	return signedData, nil
+}
+
+// One of the practical use cases of NewSignedDataWithContentType is:
+// Pasted from RFC 3161
+//
+// 2.4.2. Response Format
+// TimeStampToken ::= ContentInfo
+//      -- contentType is id-signedData ([CMS])
+//      -- content is SignedData ([CMS])
+//
+// The fields of type EncapsulatedContentInfo of the SignedData
+// construct have the following meanings:
+//
+// eContentType is an object identifier that uniquely specifies the
+// content type.  For a time-stamp token it is defined as:
+//
+// id-ct-TSTInfo  OBJECT IDENTIFIER ::= { iso(1) member-body(2)
+// us(840) rsadsi(113549) pkcs(1) pkcs-9(9) smime(16) ct(1) 4}
+//
+// eContent is the content itself, carried as an octet string.
+// The eContent SHALL be the DER-encoded value of TSTInfo.
+
+// NewSignedDataWithContentType takes content type and data and initializes a PKCS7 SignedData struct that is
+// ready to be signed via AddSigner. The digest algorithm is set to SHA1 by default
+// and can be changed by calling SetDigestAlgorithm.
+func NewSignedDataWithContentType(contentType asn1.ObjectIdentifier, data []byte) (*SignedData, error) {
+	signedData, err := newSignedData(contentType, data)
+	if err != nil {
+		return nil, err
+	}
+	return signedData, nil
+}
+
+func newSignedData(contentType asn1.ObjectIdentifier, data []byte) (*SignedData, error) {
 	content, err := asn1.Marshal(data)
 	if err != nil {
 		return nil, err
 	}
 	ci := contentInfo{
-		ContentType: OIDData,
+		ContentType: contentType,
 		Content:     asn1.RawValue{Class: 2, Tag: 0, Bytes: content, IsCompound: true},
 	}
 	sd := signedData{
@@ -102,10 +143,38 @@ func (sd *SignedData) SetDigestAlgorithm(d asn1.ObjectIdentifier) {
 	sd.digestOid = d
 }
 
+// SetEncryptionAlgorithm sets the encryption algorithm to be used in the signing process.
+//
+// This should be called before adding signers
+func (sd *SignedData) SetEncryptionAlgorithm(d asn1.ObjectIdentifier) {
+	sd.encryptionOid = d
+}
+
 // AddSigner is a wrapper around AddSignerChain() that adds a signer without any parent.
 func (sd *SignedData) AddSigner(ee *x509.Certificate, pkey crypto.PrivateKey, config SignerInfoConfig) error {
 	var parents []*x509.Certificate
-	return sd.AddSignerChain(ee, pkey, parents, config)
+	return sd.addSignerChain(ee, pkey, parents, config, true)
+}
+
+// One of the practical use cases of AddSignerNoChain is:
+// Pasted from RFC 3161
+
+// 2.4.1. Request Format
+// If the certReq field is present and set to true, the TSA's public key
+// certificate that is referenced by the ESSCertID identifier inside a
+// SigningCertificate attribute in the response MUST be provided by the
+// TSA in the certificates field from the SignedData structure in that
+// response.  That field may also contain other certificates.
+
+// If the certReq field is missing or if the certReq field is present
+// and set to false then the certificates field from the SignedData
+// structure MUST not be present in the response.
+
+// AddSignerNoChain is a wrapper around AddSignerChain() that adds a signer without any parent.
+// Use this method, if no certificate needs to be placed in SignedData certificates
+func (sd *SignedData) AddSignerNoChain(ee *x509.Certificate, pkey crypto.PrivateKey, config SignerInfoConfig) error {
+	var parents []*x509.Certificate
+	return sd.addSignerChain(ee, pkey, parents, config, false)
 }
 
 // AddSignerChain signs attributes about the content and adds certificates
@@ -122,6 +191,10 @@ func (sd *SignedData) AddSigner(ee *x509.Certificate, pkey crypto.PrivateKey, co
 // section of the SignedData.SignerInfo, alongside the serial number of
 // the end-entity.
 func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKey, chain []*x509.Certificate, config SignerInfoConfig) error {
+	return sd.addSignerChain(ee, pkey, chain, config, true)
+}
+
+func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKey, chain []*x509.Certificate, config SignerInfoConfig, includeCertificates bool) error {
 	sd.sd.DigestAlgorithmIdentifiers = append(sd.sd.DigestAlgorithmIdentifiers, pkix.AlgorithmIdentifier{Algorithm: sd.digestOid})
 	hash, err := getHashForOID(sd.digestOid)
 	if err != nil {
@@ -145,11 +218,11 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 	if err != nil {
 		return err
 	}
-	unsigned_attrs := &attributes{}
+	unsignedAttrs := &attributes{}
 	for _, attr := range config.ExtraUnsignedAttributes {
-		unsigned_attrs.Add(attr.Type, attr.Value)
+		unsignedAttrs.Add(attr.Type, attr.Value)
 	}
-	finalUnsignedAttrs, err := unsigned_attrs.ForMarshalling()
+	finalUnsignedAttrs, err := unsignedAttrs.ForMarshalling()
 	if err != nil {
 		return err
 	}
@@ -180,18 +253,90 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 		Version:                   1,
 	}
 	// create signature of signed attributes
+	sd.sd.SignerInfos = append(sd.sd.SignerInfos, signer)
+
+	if includeCertificates {
+		sd.certs = append(sd.certs, ee)
+		sd.certs = append(sd.certs, chain...)
+	}
+
+	if len(chain) > 0 {
+		sd.certs = append(sd.certs, chain...)
+	}
+
+	return nil
+}
+
+// SignWithoutAttr issues a signature on the content of the pkcs7 SignedData.
+// Unlike AddSigner/AddSignerChain, it calculates the digest on the data alone
+// and does not include any signed attributes like timestamp and so on.
+//
+// This function is needed to sign old Android APKs, something you probably
+// shouldn't do unless you're maintaining backward compatibility for old
+// applications.
+func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, pkey crypto.PrivateKey, config SignerInfoConfig) error {
+	var signature []byte
+	sd.sd.DigestAlgorithmIdentifiers = append(sd.sd.DigestAlgorithmIdentifiers, pkix.AlgorithmIdentifier{Algorithm: sd.digestOid})
+	hash, err := getHashForOID(sd.digestOid)
+	if err != nil {
+		return err
+	}
+	h := hash.New()
+	h.Write(sd.data)
+	sd.messageDigest = h.Sum(nil)
+	switch pkey.(type) {
+	case *dsa.PrivateKey:
+		// dsa doesn't implement crypto.Signer so we make a special case
+		// https://github.com/golang/go/issues/27889
+		r, s, err := dsa.Sign(rand.Reader, pkey.(*dsa.PrivateKey), sd.messageDigest)
+		if err != nil {
+			return err
+		}
+		signature, err = asn1.Marshal(dsaSignature{r, s})
+		if err != nil {
+			return err
+		}
+	default:
+		key, ok := pkey.(crypto.Signer)
+		if !ok {
+			return errors.New("pkcs7: private key does not implement crypto.Signer")
+		}
+		signature, err = key.Sign(rand.Reader, sd.messageDigest, hash)
+		if err != nil {
+			return err
+		}
+	}
+	var ias issuerAndSerial
+	ias.SerialNumber = ee.SerialNumber
+	// no parent, the issue is the end-entity cert itself
+	ias.IssuerName = asn1.RawValue{FullBytes: ee.RawIssuer}
+	if sd.encryptionOid == nil {
+		// if the encryption algorithm wasn't set by SetEncryptionAlgorithm,
+		// infer it from the digest algorithm
+		sd.encryptionOid, err = getOIDForEncryptionAlgorithm(pkey, sd.digestOid)
+	}
+	if err != nil {
+		return err
+	}
+	signer := signerInfo{
+		DigestAlgorithm:           pkix.AlgorithmIdentifier{Algorithm: sd.digestOid},
+		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: sd.encryptionOid},
+		IssuerAndSerialNumber:     ias,
+		EncryptedDigest:           signature,
+		Version:                   1,
+	}
+	// create signature of signed attributes
 	sd.certs = append(sd.certs, ee)
-	sd.certs = append(sd.certs, chain...)
 	sd.sd.SignerInfos = append(sd.sd.SignerInfos, signer)
 	return nil
 }
 
-func (si *signerInfo) SetUnauthenticatedAttributes(extra_unsigned_attrs []Attribute) error {
-	unsigned_attrs := &attributes{}
-	for _, attr := range extra_unsigned_attrs {
-		unsigned_attrs.Add(attr.Type, attr.Value)
+func (si *signerInfo) SetUnauthenticatedAttributes(extraUnsignedAttrs []Attribute) error {
+	unsignedAttrs := &attributes{}
+	for _, attr := range extraUnsignedAttrs {
+		unsignedAttrs.Add(attr.Type, attr.Value)
 	}
-	finalUnsignedAttrs, err := unsigned_attrs.ForMarshalling()
+	finalUnsignedAttrs, err := unsignedAttrs.ForMarshalling()
 	if err != nil {
 		return err
 	}
@@ -279,6 +424,7 @@ func (sd *SignedData) Detach() {
 	sd.sd.ContentInfo = contentInfo{ContentType: OIDData}
 }
 
+// GetSignedData returns the private Signed Data
 func (sd *SignedData) GetSignedData() *signedData {
 	return &sd.sd
 }
@@ -299,16 +445,17 @@ func (sd *SignedData) Finish() ([]byte, error) {
 
 // RemoveAuthenticatedAttributes removes authenticated attributes from signedData
 // similar to OpenSSL's PKCS7_NOATTR or -noattr flags
-func (sd *SignedData) RemoveAuthenticatedAttributes() error {
-	for i, _ := range sd.sd.SignerInfos {
-		blankAttrs := &attributes{}
-		finalBlankAttrs, err := blankAttrs.ForMarshalling()
-		if err != nil {
-			return err
-		}
-		sd.sd.SignerInfos[i].AuthenticatedAttributes = finalBlankAttrs
+func (sd *SignedData) RemoveAuthenticatedAttributes() {
+	for i := range sd.sd.SignerInfos {
+		sd.sd.SignerInfos[i].AuthenticatedAttributes = nil
 	}
-	return nil
+}
+
+// RemoveUnauthenticatedAttributes removes unauthenticated attributes from signedData
+func (sd *SignedData) RemoveUnauthenticatedAttributes() {
+	for i := range sd.sd.SignerInfos {
+		sd.sd.SignerInfos[i].UnauthenticatedAttributes = nil
+	}
 }
 
 // verifyPartialChain checks that a given cert is issued by the first parent in the list,
@@ -342,11 +489,6 @@ func cert2issuerAndSerial(cert *x509.Certificate) (issuerAndSerial, error) {
 
 // signs the DER encoded form of the attributes with the private key
 func signAttributes(attrs []attribute, pkey crypto.PrivateKey, digestAlg crypto.Hash) ([]byte, error) {
-	key, ok := pkey.(crypto.Signer)
-	if !ok {
-		return nil, errors.New("pkcs7: private key does not implement crypto.Signer")
-	}
-
 	attrBytes, err := marshalAttributes(attrs)
 	if err != nil {
 		return nil, err
@@ -355,7 +497,26 @@ func signAttributes(attrs []attribute, pkey crypto.PrivateKey, digestAlg crypto.
 	h.Write(attrBytes)
 	hash := h.Sum(nil)
 
+	// dsa doesn't implement crypto.Signer so we make a special case
+	// https://github.com/golang/go/issues/27889
+	switch pkey.(type) {
+	case *dsa.PrivateKey:
+		r, s, err := dsa.Sign(rand.Reader, pkey.(*dsa.PrivateKey), hash)
+		if err != nil {
+			return nil, err
+		}
+		return asn1.Marshal(dsaSignature{r, s})
+	}
+
+	key, ok := pkey.(crypto.Signer)
+	if !ok {
+		return nil, errors.New("pkcs7: private key does not implement crypto.Signer")
+	}
 	return key.Sign(rand.Reader, hash, digestAlg)
+}
+
+type dsaSignature struct {
+	R, S *big.Int
 }
 
 // concats and wraps the certificates in the RawValue structure
