@@ -324,11 +324,20 @@ func TestUnmarshal(t *testing.T) {
 	if len(inner.SignerInfos) > 0 {
 		si := inner.SignerInfos[0]
 		t.Logf("version: %d", si.Version)
+		t.Logf("issuer Name: %v", string(si.IssuerAndSerialNumber.IssuerName.Bytes))
+		t.Logf("serial Number: %v", si.IssuerAndSerialNumber.SerialNumber)
 		t.Logf("digest alg: %v", si.DigestAlgorithm)
 
 		t.Log("authentication attributes:")
 		for _, attr := range si.AuthenticatedAttributes {
 			t.Log("oid", attr.Type)
+
+			var test string
+			if _, err := asn1.Unmarshal(attr.Value.Bytes, &test); err == nil {
+				t.Log("value string:", test)
+			} else {
+				t.Log("value", string(attr.Value.Bytes))
+			}
 		}
 
 		t.Log("unauthentication attributes:")
@@ -336,11 +345,16 @@ func TestUnmarshal(t *testing.T) {
 			t.Log("oid", attr.Type)
 		}
 
-		var issuerName asn1.BitString
-		asn1.Unmarshal(si.IssuerAndSerialNumber.IssuerName.Bytes, &issuerName)
-
-		t.Logf("issuer Name: %v", issuerName)
-		t.Logf("serial Number: %v", si.IssuerAndSerialNumber.SerialNumber)
+		t.Logf("digest algo: %v", si.DigestAlgorithm)
+		t.Logf("encrypt algo: %v", si.DigestEncryptionAlgorithm)
 		// t.Logf("unauth: %v", si.UnauthenticatedAttributes)
 	}
+
+	t.Log("algorithm")
+	for _, di := range inner.DigestAlgorithmIdentifiers {
+		t.Logf("di: %v", di.Algorithm)
+	}
+
+	// t.Log("certificates", string(inner.Certificates.Raw))
+	// t.Logf("crls: %d", len(inner.CRLs))
 }

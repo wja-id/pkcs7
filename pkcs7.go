@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sort"
 
 	_ "crypto/sha1" // for crypto.SHA1
@@ -41,15 +42,16 @@ type unsignedData []byte
 
 var (
 	// Signed Data OIDs
-	OIDData                     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
-	OIDSignedData               = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
-	OIDEnvelopedData            = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 3}
-	OIDEncryptedData            = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 6}
-	OIDAttributeContentType     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
-	OIDAttributeMessageDigest   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
-	OIDAttributeSigningTime     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
-	OIDAttributeTimeStampToken  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 2, 14}
-	OIDAttributeAdobeRevocation = asn1.ObjectIdentifier{1, 2, 840, 113583, 1, 1, 8}
+	OIDData                          = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
+	OIDSignedData                    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	OIDEnvelopedData                 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 3}
+	OIDEncryptedData                 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 6}
+	OIDAttributeContentType          = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
+	OIDAttributeMessageDigest        = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
+	OIDAttributeSigningTime          = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
+	OIDAttributeTimeStampToken       = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 2, 14}
+	OIDAttributeSigningCertificateV2 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 2, 47}
+	OIDAttributeAdobeRevocation      = asn1.ObjectIdentifier{1, 2, 840, 113583, 1, 1, 8}
 
 	// Digest Algorithms
 	OIDDigestAlgorithmSHA1   = asn1.ObjectIdentifier{1, 3, 14, 3, 2, 26}
@@ -98,6 +100,8 @@ func getHashForOID(oid asn1.ObjectIdentifier) (crypto.Hash, error) {
 	case oid.Equal(OIDDigestAlgorithmSHA512), oid.Equal(OIDDigestAlgorithmECDSASHA512):
 		return crypto.SHA512, nil
 	}
+
+	log.Println("ah siap error", oid)
 	return crypto.Hash(0), ErrUnsupportedAlgorithm
 }
 
