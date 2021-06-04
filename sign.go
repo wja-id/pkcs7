@@ -12,9 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"net/http"
+	"time"
 )
 
 // SignedData is an opaque data structure for creating signed data payloads
@@ -204,6 +204,7 @@ func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 	h := hash.New()
 	h.Write(sd.data)
 	sd.messageDigest = h.Sum(nil)
+
 	encryptionOid, err := getOIDForEncryptionAlgorithm(pkey, sd.digestOid)
 	if err != nil {
 		return err
@@ -211,7 +212,7 @@ func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 	attrs := &attributes{}
 	attrs.Add(OIDAttributeContentType, sd.sd.ContentInfo.ContentType)
 	attrs.Add(OIDAttributeMessageDigest, sd.messageDigest)
-	// attrs.Add(OIDAttributeSigningTime, time.Now())
+	attrs.Add(OIDAttributeSigningTime, time.Now())
 
 	// add id-aa-signing-certificate-v2
 	if b, err := populateSigningCertificateV2(ee); err == nil {
@@ -238,23 +239,23 @@ func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 		return err
 	}
 	var ias issuerAndSerial
+	// no parent, the issue is the end-entity cert itself
+	ias.IssuerName = asn1.RawValue{FullBytes: ee.RawIssuer}
 	ias.SerialNumber = ee.SerialNumber
-	if len(chain) == 0 {
-		log.Println("no chain issuer:", string(ee.RawIssuer))
+	// if len(chain) == 0 {
+	// 	// no parent, the issue is the end-entity cert itself
+	// 	ias.IssuerName = asn1.RawValue{FullBytes: ee.RawIssuer}
+	// 	ias.SerialNumber = ee.SerialNumber
+	// } else {
+	// 	err = verifyPartialChain(ee, chain)
+	// 	if err != nil {
+	// 		return err
+	// 	}
 
-		// no parent, the issue is the end-entity cert itself
-		ias.IssuerName = asn1.RawValue{FullBytes: ee.RawIssuer}
-	} else {
-		err = verifyPartialChain(ee, chain)
-		if err != nil {
-			return err
-		}
-
-		log.Println("chain issuer:", string(chain[0].RawIssuer))
-
-		// the first parent is the issuer
-		ias.IssuerName = asn1.RawValue{FullBytes: chain[0].RawIssuer}
-	}
+	// 	// the first parent is the issuer
+	// 	ias.IssuerName = asn1.RawValue{FullBytes: chain[0].RawIssuer}
+	// 	ias.SerialNumber = chain[0].SerialNumber
+	// }
 
 	signer := signerInfo{
 		AuthenticatedAttributes:   finalAttrs,
@@ -270,7 +271,7 @@ func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 
 	if includeCertificates {
 		sd.certs = append(sd.certs, ee)
-		sd.certs = append(sd.certs, chain...)
+		// sd.certs = append(sd.certs, chain...)
 	}
 
 	if len(chain) > 0 {
@@ -462,42 +463,6 @@ func (sd *SignedData) GetSignedData() *signedData {
 
 // Finish marshals the content and its signers
 func (sd *SignedData) Finish() ([]byte, error) {
-	// testing
-	if len(sd.sd.SignerInfos) > 0 {
-		si := sd.sd.SignerInfos[0]
-		fmt.Printf("version: %d \n", si.Version)
-		fmt.Printf("digest alg: %v \n", si.DigestAlgorithm)
-		fmt.Printf("issuer Name: %v \n", si.IssuerAndSerialNumber.IssuerName)
-		fmt.Printf("serial Number: %v \n", si.IssuerAndSerialNumber.SerialNumber)
-		fmt.Printf("digest algo: %v \n", si.DigestAlgorithm)
-		fmt.Printf("encrypt algo: %v \n", si.DigestEncryptionAlgorithm)
-
-		fmt.Println("authentication attributes:")
-		for _, attr := range si.AuthenticatedAttributes {
-			fmt.Println("oid", attr.Type)
-
-			var test string
-			if _, err := asn1.Unmarshal(attr.Value.Bytes, &test); err == nil {
-				fmt.Println("value string:", test)
-			} else {
-				fmt.Println("value", string(attr.Value.Bytes))
-			}
-		}
-
-		fmt.Println("unauthentication attributes:")
-		for _, attr := range si.UnauthenticatedAttributes {
-			fmt.Println("oid", attr.Type)
-
-			var test string
-			if _, err := asn1.Unmarshal(attr.Value.Bytes, &test); err == nil {
-				fmt.Println("value string:", test)
-			} else {
-				fmt.Println("value", string(attr.Value.Bytes))
-			}
-		}
-
-	}
-
 	sd.sd.Certificates = marshalCertificates(sd.certs)
 	inner, err := asn1.Marshal(sd.sd)
 	if err != nil {
