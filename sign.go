@@ -14,7 +14,6 @@ import (
 	"io/ioutil"
 	"math/big"
 	"net/http"
-	"time"
 )
 
 // SignedData is an opaque data structure for creating signed data payloads
@@ -212,7 +211,7 @@ func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 	attrs := &attributes{}
 	attrs.Add(OIDAttributeContentType, sd.sd.ContentInfo.ContentType)
 	attrs.Add(OIDAttributeMessageDigest, sd.messageDigest)
-	attrs.Add(OIDAttributeSigningTime, time.Now())
+	// attrs.Add(OIDAttributeSigningTime, time.Now())
 
 	// add id-aa-signing-certificate-v2
 	if b, err := populateSigningCertificateV2(ee); err == nil {
@@ -358,6 +357,25 @@ func (si *signerInfo) SetUnauthenticatedAttributes(extraUnsignedAttrs []Attribut
 	si.UnauthenticatedAttributes = finalUnsignedAttrs
 
 	return nil
+}
+
+type TimestampTokenRequestCallback func(digest []byte) ([]byte, error)
+
+func (sd *SignedData) RequestSignerTimestampToken(signerID int, callback TimestampTokenRequestCallback) error {
+	if len(sd.sd.SignerInfos) < (signerID + 1) {
+		return fmt.Errorf("no signer information found for ID %d", signerID)
+	}
+
+	if callback == nil {
+		return fmt.Errorf("no callback defined")
+	}
+
+	tst, err := callback(sd.messageDigest)
+	if err != nil {
+		return err
+	}
+
+	return sd.AddTimestampTokenToSigner(signerID, tst)
 }
 
 // AddTimestampTokenToSigner inserts TimestampToken which described in RFC3161 into

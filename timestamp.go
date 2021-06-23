@@ -8,6 +8,7 @@ package pkcs7 // import "go.mozilla.org/pkcs7"
 
 import (
 	"crypto"
+	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -16,6 +17,20 @@ import (
 	"strconv"
 	"time"
 )
+
+var (
+	nonceBytes = 16
+)
+
+// GenerateNonce generates a new nonce for this TSR.
+func GenerateNonce() *big.Int {
+	buf := make([]byte, nonceBytes)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err)
+	}
+
+	return new(big.Int).SetBytes(buf[:])
+}
 
 // Timestamp represents an timestamp. See:
 // https://tools.ietf.org/html/rfc3161#section-2.4.1
@@ -141,6 +156,7 @@ func (req *TSRequest) Marshal() ([]byte, error) {
 		},
 		CertReq:    req.Certificates,
 		Extensions: req.ExtraExtensions,
+		Nonce:      GenerateNonce(),
 	})
 }
 
