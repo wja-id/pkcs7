@@ -9,9 +9,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math/big"
 	"net/http"
 )
@@ -204,6 +206,8 @@ func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 	h.Write(sd.data)
 	sd.messageDigest = h.Sum(nil)
 
+	log.Println("message digest:", hex.EncodeToString(sd.messageDigest))
+
 	encryptionOid, err := getOIDForEncryptionAlgorithm(pkey, sd.digestOid)
 	if err != nil {
 		return err
@@ -370,7 +374,7 @@ func (sd *SignedData) RequestSignerTimestampToken(signerID int, callback Timesta
 		return fmt.Errorf("no callback defined")
 	}
 
-	tst, err := callback(sd.messageDigest)
+	tst, err := callback(sd.sd.SignerInfos[0].EncryptedDigest)
 	if err != nil {
 		return err
 	}
