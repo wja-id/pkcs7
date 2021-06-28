@@ -16,6 +16,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"time"
 )
 
 // SignedData is an opaque data structure for creating signed data payloads
@@ -215,10 +216,10 @@ func (sd *SignedData) addSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 	attrs := &attributes{}
 	attrs.Add(OIDAttributeContentType, sd.sd.ContentInfo.ContentType)
 	attrs.Add(OIDAttributeMessageDigest, sd.messageDigest)
-	// attrs.Add(OIDAttributeSigningTime, time.Now())
+	attrs.Add(OIDAttributeSigningTime, time.Now())
 
 	// add id-aa-signing-certificate-v2
-	if b, err := populateSigningCertificateV2(ee); err == nil {
+	if b, err := populateSigningCertificateV2Ext(ee); err == nil {
 		attrs.Add(OIDAttributeSigningCertificateV2, asn1.RawValue{FullBytes: b})
 	}
 
@@ -374,7 +375,7 @@ func (sd *SignedData) RequestSignerTimestampToken(signerID int, callback Timesta
 		return fmt.Errorf("no callback defined")
 	}
 
-	tst, err := callback(sd.sd.SignerInfos[0].EncryptedDigest)
+	tst, err := callback(sd.sd.SignerInfos[signerID].EncryptedDigest)
 	if err != nil {
 		return err
 	}
@@ -620,28 +621,24 @@ func DegenerateCertificate(cert []byte) ([]byte, error) {
 	return asn1.Marshal(signedContent)
 }
 
-func populateSigningCertificateV2(ee *x509.Certificate) ([]byte, error) {
-	// encode certificate
+func populateSigningCertificateV2Ext(certificate *x509.Certificate) ([]byte, error) {
 	h := sha256.New()
-	_, err := h.Write(ee.Raw)
-	if err != nil {
-		return nil, err
-	}
-
-	hashAlg := pkix.AlgorithmIdentifier{
-		Algorithm:  OIDDigestAlgorithmSHA256,
-		Parameters: asn1.NullRawValue,
-	}
+	h.Write(certificate.Raw)
 
 	signingCertificateV2 := signingCertificateV2{
-		Certs: []essCertIDv2{{
-			HashAlgorithm: hashAlg,
-			CertHash:      h.Sum(nil),
-			// IssuerSerial: issuerAndSerial{
-			// 	IssuerName:   asn1.RawValue{FullBytes: ee.RawIssuer},
-			// 	SerialNumber: ee.SerialNumber,
-			// },
-		}},
+		Certs: []essCertIDv2{
+			{
+				HashAlgorithm: pkix.AlgorithmIdentifier{
+					Algorithm:  asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1},
+					Parameters: asn1.NullRawValue,
+				},
+				CertHash: h.Sum(nil),
+				IssuerSerial: issuerAndSerial{
+					IssuerName:   asn1.RawValue{FullBytes: certificate.RawIssuer},
+					SerialNumber: certificate.SerialNumber,
+				},
+			},
+		},
 	}
 	signingCertV2Bytes, err := asn1.Marshal(signingCertificateV2)
 	if err != nil {
